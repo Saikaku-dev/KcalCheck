@@ -1,0 +1,10 @@
+xcuserdata/
+.build/
+Carthage/Build/
+*.xcuserstate
+*.plist
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+DerivedData/
