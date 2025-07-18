@@ -8,6 +8,7 @@
 import SwiftUI
 import CoreMotion
 import UIKit
+import SwiftData
 
 class HomeViewModel: ObservableObject {
     @Published var isStepCountingAvailable: Bool = false //歩数
@@ -68,34 +69,98 @@ class HomeViewModel: ObservableObject {
         }
     }
     
-    func stop() {
+    func stop(modelContext: ModelContext) {
         pedometer.stopUpdates()
         pedometer.stopEventUpdates()
         
         //dataのデータを保存する(運動開始日と消費したカロリー)
-        guard let data = data else { return }
+        guard let data = data else { 
+            message = "データがありません"
+            return 
+        }
+        
         let startedData = data.startDate.dateString()
         let kcal = kcalCalculation()
-        addHistory(date: startedData, kcal: kcal ?? 0)
-        message = "停止しました"
+        
+        // モデルコンテキストが有効かどうかを確認
+        do {
+            // テスト用に空のクエリを実行して、モデルコンテキストが有効かどうかを確認
+            let _ = try modelContext.fetch(FetchDescriptor<HistoryItem>())
+            // モデルコンテキストが有効な場合、履歴を追加
+            addHistory(date: startedData, kcal: kcal ?? 0, modelContext: modelContext)
+            
+            // 「お疲れ様です」メッセージを表示し、3秒後に「停止しました」に戻す
+            message = "お疲れ様です"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.message = "停止しました"
+            }
+        } catch {
+            print("モデルコンテキストエラー: \(error)")
+            message = "データの保存に失敗しました: \(error.localizedDescription)"
+            // エラーが発生しても、アプリが閉じないようにする
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.message = "停止しました（データは保存されていません）"
+            }
+        }
     }
     
-    func addHistory(date: String, kcal: Double) {
-        let item = HistoryItem(date: date, kcal: kcal)
-        histories.append(item)
+    func addHistory(date: String, kcal: Double, modelContext: ModelContext) {
+        guard let data = data else { 
+            print("データがnilのため履歴を追加できません")
+            message = "データがないため保存できません"
+            return 
+        }
+        
+        // 获取用户名，如果用户数据为空则使用默认值
+        let userName = CurrentUser.shared.user?.nickName ?? "未知ユーザー"
+        
+        // 時間のフォーマット
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        let startTime = formatter.string(from: data.startDate)
+        let endTime = formatter.string(from: data.endDate)
+        
+        do {
+            // 新しいHistoryItemを作成
+            let item = HistoryItem(
+                date: date,
+                kcal: kcal,
+                userName: userName,
+                steps: data.numberOfSteps.intValue,
+                distance: data.distance?.doubleValue ?? 0.0,
+                startTime: startTime,
+                endTime: endTime
+            )
+            
+            // ローカル配列に追加
+            histories.append(item)
+            
+            // SwiftDataに保存
+            modelContext.insert(item)
+            try modelContext.save()
+            print("履歴が正常に保存されました: \(date), \(kcal) kcal, \(data.numberOfSteps.intValue) 歩")
+        } catch {
+            print("履歴の保存中にエラーが発生しました: \(error)")
+            message = "データの保存に失敗しました: \(error.localizedDescription)"
+            // エラーの詳細をログに記録
+            print("エラーの詳細: \(error)")
+        }
     }
     
     func kcalCalculation() -> Double? {
         guard
             let data = data,
-            let distance = data.distance?.doubleValue,
-            let user = CurrentUser.shared.user
+            let distance = data.distance?.doubleValue
         else {
             return nil
         }
+        
+        // 使用默认体重或从用户数据获取
+        let weight = CurrentUser.shared.user?.userWeight ?? 60.0 // 默认体重
+        
         // カロリーの計算公式：体重(kg) × 距離(km) × 係数(1.05)
         // 1.05 歩きのMETs値
-        let weight = user.userWeight
         let distanceKm = distance / 1000.0
         let kcal = weight * distanceKm * 1.05
         return kcal
@@ -103,30 +168,22 @@ class HomeViewModel: ObservableObject {
 }
 
 struct HomeView: View {
+    @Environment(\.modelContext) private var modelContext
     @StateObject private var vm = HomeViewModel()
     var body: some View {
         VStack {
             HStack {
-                if let user = CurrentUser.shared.user {
-                    Text(user.nickName)
-                        .font(.title)
-                        .foregroundColor(.red)
-                    Text("さん、こんにちは！")
-                        .font(.title2)
-                } else {
-                    Text("Preview")
-                        .font(.title)
-                        .foregroundColor(.red)
-                    Text("さん、こんにちは！")
-                        .font(.title2)
-                }
+                Text(CurrentUser.shared.user?.nickName ?? "ゲスト")
+                    .font(.title)
+                    .foregroundColor(.red)
+                Text("さん、こんにちは！")
+                    .font(.title2)
             }
             
             Spacer()
             
             // MARK: - データ
-            if let data = vm.data,
-               let user = CurrentUser.shared.user {
+            if let data = vm.data {
                 VStack(alignment: .leading, spacing: 16) {
                     // 状态消息
                     Text(vm.message)
@@ -229,12 +286,16 @@ struct HomeView: View {
                 if vm.isStarted {
                     vm.start()
                 } else {
-                    vm.stop()
+                    vm.stop(modelContext: modelContext)
                 }
             }) {
                 Text(vm.isStarted ? "運動終了" :"運動開始")
                     .foregroundColor(vm.isStarted ? .red : .green)
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
             }
+            .padding(.bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         
@@ -258,4 +319,5 @@ extension Date {
 
 #Preview {
     HomeView()
+        .modelContainer(for: [HistoryItem.self, Goal.self])
 }
