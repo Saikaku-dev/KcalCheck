@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct MainTabView: View {
     var body: some View {
@@ -20,10 +21,21 @@ struct MainTabView: View {
                     Image(systemName: "clock")
                     Text("History")
                 }
+            GoalView()
+                .tabItem {
+                    Image(systemName: "flag.fill")
+                    Text("目標")
+                }
+            StatsView()
+                .tabItem {
+                    Image(systemName: "chart.bar.fill")
+                    Text("統計")
+                }
         }
     }
 }
 
 #Preview {
     MainTabView()
+        .modelContainer(for: [HistoryItem.self, Goal.self])
 }

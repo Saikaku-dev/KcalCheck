@@ -6,12 +6,22 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct PedometerSampleApp: App {
+    @State private var hasValidUser: Bool = false
+    
     var body: some Scene {
         WindowGroup {
-            EntryView()
+            Group {
+                if CurrentUser.shared.user != nil {
+                    MainTabView()
+                } else {
+                    EntryView()
+                }
+            }
         }
+        .modelContainer(for: [HistoryItem.self, Goal.self])
     }
 }
